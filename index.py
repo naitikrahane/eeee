@@ -1,119 +1,111 @@
 import logging  
-from telegram.ext import Updater, CommandHandler, CallbackQueryHandler, MessageHandler, Filters  
-from telegram import InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardMarkup, ReplyKeyboardRemove  
+from telegram.ext import Updater, CommandHandler, CallbackQueryHandler  
 import random  
-import pymongo  
   
-# Database connection  
-client = pymongo.MongoClient("mongodb://localhost:27017/")  
-db = client["bot_db"]  
-users_collection = db["users"]  
-games_collection = db["games"]  
-  
-# Bot token  
-TOKEN = 'YOUR_BOT_TOKEN'  
-  
-# Logging  
 logging.basicConfig(level=logging.INFO)  
   
-# Bot commands  
+TOKEN = 'YOUR_BOT_TOKEN'  
+MIN_WITHDRAWAL_AMOUNT = 10  
+REFER_BONUS = 5  
+CHANNEL_LINK = 'https://t.me/YOUR_CHANNEL_LINK'  
+ADMIN_ID = 123456789  
+  
+users = {}  
+games = {}  
+  
 def start(update, context):  
    user_id = update.effective_user.id  
-   if users_collection.find_one({"user_id": user_id}) is None:  
-      users_collection.insert_one({"user_id": user_id, "balance": 100, "referrals": 0})  
-   context.bot.send_message(chat_id=update.effective_chat.id, text='Welcome to our bot!')  
+   if user_id not in users:  
+      users[user_id] = {'balance': 0, 'eferrals': 0}  
+   context.bot.send_message(chat_id=update.effective_chat.id, text='Welcome to the bot!')  
   
 def balance(update, context):  
    user_id = update.effective_user.id  
-   user = users_collection.find_one({"user_id": user_id})  
-   context.bot.send_message(chat_id=update.effective_chat.id, text=f'Your balance: {user["balance"]}')  
+   balance = users[user_id]['balance']  
+   context.bot.send_message(chat_id=update.effective_chat.id, text=f'Your balance: {balance}')  
   
 def refer(update, context):  
    user_id = update.effective_user.id  
-   user = users_collection.find_one({"user_id": user_id})  
-   context.bot.send_message(chat_id=update.effective_chat.id, text=f'Your referral link: https://t.me/your_bot?start={user_id}')  
+   users[user_id]['referrals'] += 1  
+   context.bot.send_message(chat_id=update.effective_chat.id, text='You have referred a new user!')  
+  
+def statistics(update, context):  
+   total_users = len(users)  
+   total_bets = sum(user['balance'] for user in users.values())  
+   context.bot.send_message(chat_id=update.effective_chat.id, text=f'Total users: {total_users}\nTotal bets: {total_bets}')  
   
 def withdraw(update, context):  
    user_id = update.effective_user.id  
-   user = users_collection.find_one({"user_id": user_id})  
-   if user["balance"] &lt; 10:  
+   amount = int(context.args)  
+   if amount &lt; MIN_WITHDRAWAL_AMOUNT:  
       context.bot.send_message(chat_id=update.effective_chat.id, text='Minimum withdrawal amount is 10')  
+   elif amount &gt; users[user_id]['balance']:  
+      context.bot.send_message(chat_id=update.effective_chat.id, text='Insufficient balance')  
    else:  
-      users_collection.update_one({"user_id": user_id}, {"$inc": {"balance": -10}})  
-      context.bot.send_message(chat_id=update.effective_chat.id, text='Withdrawal successful')  
+      users[user_id]['balance'] -= amount  
+      context.bot.send_message(chat_id=update.effective_chat.id, text=f'Withdrawal successful! Your new balance: {users[user_id]["balance"]}')  
   
 def head_tail_game(update, context):  
    user_id = update.effective_user.id  
-   user = users_collection.find_one({"user_id": user_id})  
-   if user["balance"] &lt; 1:  
-      context.bot.send_message(chat_id=update.effective_chat.id, text='You do not have enough balance to play')  
+   amount = int(context.args)  
+   if amount &lt; 1:  
+      context.bot.send_message(chat_id=update.effective_chat.id, text='Minimum bet amount is 1')  
+   elif amount &gt; users[user_id]['balance']:  
+      context.bot.send_message(chat_id=update.effective_chat.id, text='Insufficient balance')  
    else:  
-      keyboard = [  
-        [InlineKeyboardButton('Head', callback_data='head'), InlineKeyboardButton('Tail', callback_data='tail')]  
-      ]  
-      reply_markup = InlineKeyboardMarkup(keyboard)  
-      context.bot.send_message(chat_id=update.effective_chat.id, text='Choose Head or Tail:', reply_markup=reply_markup)  
+      users[user_id]['balance'] -= amount  
+      outcome = random.choice(['head', 'tail'])  
+      if outcome == 'head':  
+        users[user_id]['balance'] += amount * 1.98  
+        context.bot.send_message(chat_id=update.effective_chat.id, text=f'You won! Your new balance: {users[user_id]["balance"]}')  
+      else:  
+        context.bot.send_message(chat_id=update.effective_chat.id, text=f'You lost! Your new balance: {users[user_id]["balance"]}')  
   
 def dice_game(update, context):  
    user_id = update.effective_user.id  
-   user = users_collection.find_one({"user_id": user_id})  
-   if user["balance"] &lt; 1:  
-      context.bot.send_message(chat_id=update.effective_chat.id, text='You do not have enough balance to play')  
+   amount = int(context.args)  
+   if amount &lt; 1:  
+      context.bot.send_message(chat_id=update.effective_chat.id, text='Minimum bet amount is 1')  
+   elif amount &gt; users[user_id]['balance']:  
+      context.bot.send_message(chat_id=update.effective_chat.id, text='Insufficient balance')  
    else:  
-      keyboard = [  
-        [InlineKeyboardButton('Roll', callback_data='roll')]  
-      ]  
-      reply_markup = InlineKeyboardMarkup(keyboard)  
-      context.bot.send_message(chat_id=update.effective_chat.id, text='Roll the dice:', reply_markup=reply_markup)  
+      users[user_id]['balance'] -= amount  
+      dice_value = random.randint(1, 6)  
+      context.bot.send_message(chat_id=update.effective_chat.id, text=f'You rolled a {dice_value}')  
+      if dice_value == 6:  
+        users[user_id]['balance'] += amount * 6  
+        context.bot.send_message(chat_id=update.effective_chat.id, text=f'You won! Your new balance: {users[user_id]["balance"]}')  
+      else:  
+        context.bot.send_message(chat_id=update.effective_chat.id, text=f'You lost! Your new balance: {users[user_id]["balance"]}')  
   
 def tic_tac_toe_game(update, context):  
    user_id = update.effective_user.id  
-   user = users_collection.find_one({"user_id": user_id})  
-   if user["balance"] &lt; 1:  
-      context.bot.send_message(chat_id=update.effective_chat.id, text='You do not have enough balance to play')  
-   else:  
-      keyboard = [  
-        [InlineKeyboardButton('X', callback_data='x'), InlineKeyboardButton('O', callback_data='o')]  
-      ]  
-      reply_markup = InlineKeyboardMarkup(keyboard)  
-      context.bot.send_message(chat_id=update.effective_chat.id, text='Play Tic Tac Toe:', reply_markup=reply_markup)  
-  
-def button_callback(update, context):  
-   query = update.callback_query  
-   user_id = query.from_user.id  
-   user = users_collection.find_one({"user_id": user_id})  
-   if query.data == 'head':  
-      outcome = random.choice(['head', 'tail'])  
-      if outcome == 'head':  
-        users_collection.update_one({"user_id": user_id}, {"$inc": {"balance": 1.98}})  
-        context.bot.send_message(chat_id=query.message.chat_id, text='You win!')  
-      else:  
-        users_collection.update_one({"user_id": user_id}, {"$inc": {"balance": -1}})  
-        context.bot.send_message(chat_id=query.message.chat_id, text='You lose!')  
-   elif query.data == 'tail':  
-      outcome = random.choice(['head', 'tail'])  
-      if outcome == 'tail':  
-        users_collection.update_one({"user_id": user_id}, {"$inc": {"balance": 1.98}})  
-        context.bot.send_message(chat_id=query.message.chat_id, text='You win!')  
-      else:  
-        users_collection.update_one({"user_id": user_id}, {"$inc": {"balance": -1}})  
-        context.bot.send_message(chat_id=query.message.chat_id, text='You lose!')  
-   elif query.data == 'roll':  
-      dice_value = random.randint(1, 6)  
-      context.bot.send_message(chat_id=query.message.chat_id, text=f'You rolled a {dice_value}')  
-      # Implement dice game logic here  
-   elif query.data == 'x' or query.data == 'o':  
-      # Implement Tic Tac Toe game logic here  
-      pass  
+   context.bot.send_message(chat_id=update.effective_chat.id, text='Tic Tac Toe game is not implemented yet')  
   
 def admin_panel(update, context):  
    user_id = update.effective_user.id  
-   if user_id == YOUR_ADMIN_ID:  
-      keyboard = [  
-        [InlineKeyboardButton('Minimum withdrawal amount', callback_data='min_withdrawal'), InlineKeyboardButton('Refer bonus', callback_data='refer_bonus')],  
-        [InlineKeyboardButton('Broadcast', callback_data='broadcast'), InlineKeyboardButton('Ban/unban user', callback_data='ban_unban')]  
-      ]  
-      reply_markup = InlineKeyboardMarkup(keyboard)  
-      context.bot.send_message(chat_id=update.effective_chat.id, text='Admin panel:', reply_markup=reply_markup)  
+   if user_id == ADMIN_ID:  
+      context.bot.send_message(chat_id=update.effective_chat.id, text='Admin panel')  
    else:  
-      context.bot.send_message
+      context.bot.send_message(chat_id=update.effective_chat.id, text='Access denied')  
+  
+def main():  
+   updater = Updater(TOKEN, use_context=True)  
+  
+   dp = updater.dispatcher  
+  
+   dp.add_handler(CommandHandler('start', start))  
+   dp.add_handler(CommandHandler('balance', balance))  
+   dp.add_handler(CommandHandler('refer', refer))  
+   dp.add_handler(CommandHandler('statistics', statistics))  
+   dp.add_handler(CommandHandler('withdraw', withdraw))  
+   dp.add_handler(CommandHandler('head_tail', head_tail_game))  
+   dp.add_handler(CommandHandler('dice', dice_game))  
+   dp.add_handler(CommandHandler('tic_tac_toe', tic_tac_toe_game))  
+   dp.add_handler(CommandHandler('admin', admin_panel))  
+  
+   updater.start_polling()  
+   updater.idle()  
+  
+if __name__ == '__main__':  
+   main()  
